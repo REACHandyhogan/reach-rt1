@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>REACH Tool #1 — The 30-Second Rule</title>
+<style>
+:root{--blue:#0d4f9a;--orange:#f58220;--ink:#172033;--muted:#667085;--line:#d9dee7;--soft:#f6f8fb}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#eef2f7;color:var(--ink)}
+body{display:flex;justify-content:center;padding:18px}.app{width:min(100%,460px);min-height:calc(100vh - 36px);background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 18px 50px rgba(16,24,40,.16);display:flex;flex-direction:column}
+.top{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.brand{font-weight:900;color:var(--blue)}.status{font-size:13px;color:var(--muted)}
+main{padding:28px 24px;display:flex;flex-direction:column;flex:1}.eyebrow{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--blue);font-weight:800;margin-bottom:8px}
+h1{font-size:29px;line-height:1.12;margin:0 0 14px;color:var(--blue)}p{font-size:17px;line-height:1.5;margin:0 0 14px}.small{font-size:14px;color:var(--muted)}
+.callout{border:1px solid #e1e6ee;background:var(--soft);border-radius:18px;padding:16px;margin:14px 0}.orange{background:#fff6ea;border-color:#ffd7ad}.center{text-align:center}
+.actions{display:grid;gap:10px;margin-top:auto;padding-top:20px}button{border:0;border-radius:14px;padding:15px 16px;font-size:17px;font-weight:800;cursor:pointer}.primary{background:var(--blue);color:#fff}.orange-btn{background:var(--orange);color:#fff}.secondary{background:white;color:var(--blue);border:2px solid var(--blue)}
+.timer{font-size:76px;font-weight:900;color:var(--orange);margin:16px 0 0}.qr{display:block;width:260px;max-width:90%;margin:16px auto;background:white;padding:8px;border-radius:18px;border:1px solid var(--line)}
+.hidden{display:none!important}.rolebadge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef4ff;color:var(--blue);font-size:13px;font-weight:800}.question{font-size:22px;line-height:1.35}
+@media(max-width:390px){body{padding:0}.app{min-height:100vh;border-radius:0}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">REACH Tool #1</div>
+    <div class="status" id="status">Connecting…</div>
+  </div>
+  <main id="main"></main>
+</div>
+<script>
+const main = document.getElementById("main");
+const statusEl = document.getElementById("status");
+const qs = new URLSearchParams(location.search);
+let session = qs.get("session");
+let role = qs.get("role");
+let ws = null;
+let state = null;
+let localTimer = null;
+
+const questions = [
+  "How long do we usually listen before we start thinking about what we want to say?",
+  "What needs were each of us trying to meet during our conversation?",
+  "Did the way we talked help meet those needs?",
+  "What could we do to balance giving and receiving attention in future conversations?"
+];
+
+function btn(label, cls, fn) {
+  const b = document.createElement("button");
+  b.textContent = label; b.className = cls; b.onclick = fn; return b;
+}
+function clearTimer(){ if(localTimer){clearInterval(localTimer); localTimer=null;} }
+function send(obj){ if(ws && ws.readyState===1) ws.send(JSON.stringify(obj)); }
+
+async function createSession() {
+  const r = await fetch("/api/session");
+  const j = await r.json();
+  session = j.code; role = "A";
+  history.replaceState(null,"",`?session=${session}&role=A`);
+  connect();
+}
+function connect(){
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/?session=${session}&role=${role}`);
+  ws.onopen=()=>statusEl.textContent="Connected";
+  ws.onclose=()=>statusEl.textContent="Disconnected";
+  ws.onmessage=e=>{
+    const msg=JSON.parse(e.data);
+    if(msg.type==="state"){state=msg.state; statusEl.textContent=msg.connected===2?"Both phones connected":`${msg.connected}/2 connected`; render(msg.connected);}
+  };
+}
+
+function render(connected=1){
+  clearTimer();
+  if(!session){ welcome(); return; }
+  const phase = state?.phase || "waiting";
+
+  if(role==="A" && connected<2){
+    const joinUrl = `${location.origin}${location.pathname}?session=${session}&role=B`;
+    main.innerHTML = `
+      <div class="eyebrow">Your REACH Gift</div>
+      <h1>Find Someone</h1>
+      <p>Have the other person scan this code with their phone.</p>
+      <img class="qr" alt="Join this REACH conversation" src="/api/qr?url=${encodeURIComponent(joinUrl)}">
+      <div class="callout center"><strong>Session ${session}</strong><br><span class="small">Their phone will join this conversation automatically.</span></div>
+      <div class="actions"><button class="secondary" id="onePhone">Use One Phone Instead</button></div>`;
+    document.getElementById("onePhone").onclick=()=>alert("One-phone mode can use the existing REACH Gift prototype.");
+    return;
+  }
+
+  if(role==="B" && connected<2){
+    main.innerHTML=`<div class="eyebrow">Joining</div><h1>Connecting to Your REACH Conversation</h1><p>Please keep this page open.</p>`;
+    return;
+  }
+
+  if(phase==="ready"){
+    main.innerHTML=`
+      <div class="eyebrow">You’re Connected</div>
+      <h1>Let’s REACH</h1>
+      <p>${role==="A" ? "You’ll go first." : "The other person will go first."}</p>
+      <div class="callout"><strong>30-Second Rule:</strong> One person talks for about 30 seconds, then invites the other person to talk.</div>
+      <div class="actions"></div>`;
+    const a=main.querySelector(".actions");
+    if(role==="A") a.appendChild(btn("Start", "primary", ()=>send({type:"set_phase",phase:"turnA",speaker:"A"})));
+    else a.innerHTML='<div class="small center">Waiting for them to start…</div>';
+    return;
+  }
+
+  if(phase==="turnA"){
+    if(role==="A"){
+      main.innerHTML=`
+        <span class="rolebadge">Your turn</span><h1>Talk About Whatever You Want</h1>
+        <p>You might share something that happened to you, something you’re working on or thinking about, something that concerns you, or something you’re happy about.</p>
+        <p><strong>When you’re ready, tap “Talk” and start talking.</strong></p>
+        <div class="actions"><button class="orange-btn" id="talk">Talk</button></div>`;
+      document.getElementById("talk").onclick=()=>send({type:"start_timer",speaker:"A"});
+    } else {
+      main.innerHTML=`<span class="rolebadge">Listen</span><h1>Give Them Your Attention</h1><p>Listen while they share what they want to say.</p><div class="small center">Their timer will appear when they begin.</div>`;
+    }
+    return;
+  }
+
+  if(phase==="talking"){
+    const speaking = state.speaker===role;
+    main.innerHTML=`
+      <span class="rolebadge">${speaking?"Your turn":"Listen"}</span>
+      <h1>${speaking?"Keep Talking":"Give Them Your Attention"}</h1>
+      <div class="center"><div class="timer" id="timer">30</div><div class="small">seconds</div></div>`;
+    const el=document.getElementById("timer");
+    const update=()=>{
+      const left=Math.max(0,Math.ceil((state.timerEndsAt-Date.now())/1000));
+      el.textContent=left;
+    };
+    update(); localTimer=setInterval(update,250);
+    return;
+  }
+
+  if(phase==="inviteB"){
+    if(role==="A"){
+      main.innerHTML=`
+        <span class="rolebadge">Invite them</span><h1>Invite Them To Talk</h1>
+        <p>Say:</p><div class="callout orange center"><strong>“Thank you for listening to me. What would you like to say?”</strong></div>
+        <div class="actions"><button class="primary" id="invited">I Asked</button></div>`;
+      document.getElementById("invited").onclick=()=>send({type:"set_phase",phase:"turnB",speaker:"B"});
+    } else {
+      main.innerHTML=`<span class="rolebadge">Get ready</span><h1>Your Turn Is Next</h1><p>They’re inviting you into the conversation.</p>`;
+    }
+    return;
+  }
+
+  if(phase==="turnB"){
+    if(role==="B"){
+      main.innerHTML=`
+        <span class="rolebadge">Your turn</span><h1>What Would You Like To Say?</h1>
+        <p>Talk about whatever you want.</p><p><strong>When you’re ready, tap “Talk” and start talking.</strong></p>
+        <div class="actions"><button class="orange-btn" id="talk">Talk</button></div>`;
+      document.getElementById("talk").onclick=()=>send({type:"start_timer",speaker:"B"});
+    } else {
+      main.innerHTML=`<span class="rolebadge">Listen</span><h1>Give Them Your Attention</h1><p>Listen while they share what they want to say.</p>`;
+    }
+    return;
+  }
+
+  if(phase==="afterB"){
+    main.innerHTML=`
+      <h1>Keep the Conversation Going</h1>
+      <p>You can take another turn, or talk together about what you Recognized.</p>
+      <div class="actions">
+        <button class="orange-btn" id="again">Keep Talking</button>
+        <button class="primary" id="recognize">Recognize Together</button>
+      </div>`;
+    document.getElementById("again").onclick=()=>send({type:"set_phase",phase:"turnA",speaker:"A"});
+    document.getElementById("recognize").onclick=()=>send({type:"set_phase",phase:"recognize",speaker:"A"});
+    return;
+  }
+
+  if(phase==="recognize"){
+    const q=questions[state.questionIndex||0];
+    main.innerHTML=`
+      <span class="rolebadge">Recognize together</span>
+      <h1>Talk About What You Noticed</h1>
+      <div class="callout orange center question"><strong>${q}</strong></div>
+      <p>${role==="A" ? "Answer first. When you finish, ask: “What do you think?”" : "Listen first. When they ask “What do you think?”, answer in your own 30-second turn."}</p>
+      <div class="actions">
+        <button class="orange-btn" id="talk">Talk</button>
+        <button class="secondary" id="nextq">Next Question</button>
+        <button class="primary" id="finish">Finish</button>
+      </div>`;
+    document.getElementById("talk").onclick=()=>send({type:"start_timer",speaker:role});
+    document.getElementById("nextq").onclick=()=>send({type:"next_question"});
+    document.getElementById("finish").onclick=()=>send({type:"set_phase",phase:"complete"});
+    return;
+  }
+
+  if(phase==="complete"){
+    main.innerHTML=`
+      <div class="eyebrow">REACH Tool #1</div>
+      <h1>Great work!</h1>
+      <div class="callout orange center"><strong>00R4SR RT1<br>The 30-Second Rule</strong></div>
+      <p class="center"><strong>Relate a little; return a lot.</strong></p>
+      <div class="actions"><button class="orange-btn" id="again">Use It Again</button></div>`;
+    document.getElementById("again").onclick=()=>send({type:"reset"});
+  }
+}
+
+function welcome(){
+  main.innerHTML=`
+    <div class="eyebrow">Your REACH Gift</div>
+    <h1>Great work!</h1>
+    <p>Your REACH gift is a tool to help you practice the <strong>30-Second Rule</strong>.</p>
+    <p>Click <strong>“Let’s REACH”</strong> to begin.</p>
+    <div class="actions"><button class="primary" id="begin">Let’s REACH</button></div>`;
+  document.getElementById("begin").onclick=createSession;
+}
+if(session && role) connect(); else welcome();
+</script>
+</body>
+</html>
