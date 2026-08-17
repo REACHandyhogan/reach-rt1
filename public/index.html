@@ -259,15 +259,52 @@ function render(connected=1){
     return;
   }
 
-  if(phase==="complete"){
-    main.innerHTML=`
-      <div class="eyebrow">REACH Tool #1</div>
-      <h1>Great work!</h1>
-      <div class="callout orange center"><strong>00R4SR RT1<br>The 30-Second Rule</strong></div>
-      <p class="center"><strong>Relate a little; return a lot.</strong></p>
-      <div class="actions"><button class="orange-btn" id="again">Use It Again</button></div>`;
-    document.getElementById("again").onclick=()=>send({type:"reset"});
-  }
+ if(phase==="complete"){
+  main.innerHTML=`
+    <div class="eyebrow">REACH Tool #1</div>
+    <h1>Great work!</h1>
+
+    <div class="callout orange center">
+      <strong>00R4SR RT1<br>The 30-Second Rule</strong>
+    </div>
+
+    <p class="center"><strong>Relate a little; return a lot.</strong></p>
+
+    <div class="callout center">
+      <strong>You just used a REACH Tool.</strong>
+    </div>
+
+    <div class="actions">
+      <button class="orange-btn" id="again">Use It Again</button>
+      <button class="secondary" id="shareGift">Share This Gift</button>
+      <button class="primary" id="moreTools">Discover More REACH Tools</button>
+    </div>`;
+
+  document.getElementById("again").onclick=()=>send({type:"reset"});
+
+  document.getElementById("shareGift").onclick=async()=>{
+    const shareData={
+      title:"Your First REACH Gift",
+      text:"Try REACH Tool #1 — The 30-Second Rule.",
+      url:"https://reachandyhogan.com/reach-tools"
+    };
+
+    try{
+      if(navigator.share){
+        await navigator.share(shareData);
+      }else{
+        await navigator.clipboard.writeText(shareData.url);
+        alert("REACH Gift link copied.");
+      }
+    }catch(e){}
+  };
+
+  document.getElementById("moreTools").onclick=()=>{
+    window.top.location.href="https://reachandyhogan.com/reach-tools";
+  };
+
+  return;
+}
 }
 
 function welcome(){
