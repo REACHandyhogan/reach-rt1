@@ -14,7 +14,7 @@ h1{font-size:29px;line-height:1.12;margin:0 0 14px;color:var(--blue)}p{font-size
 .callout{border:1px solid #e1e6ee;background:var(--soft);border-radius:18px;padding:16px;margin:14px 0}.orange{background:#fff6ea;border-color:#ffd7ad}.center{text-align:center}
 .actions{display:grid;gap:10px;margin-top:auto;padding-top:20px}button{border:0;border-radius:14px;padding:15px 16px;font-size:17px;font-weight:800;cursor:pointer}.primary{background:var(--blue);color:#fff}.orange-btn{background:var(--orange);color:#fff}.secondary{background:white;color:var(--blue);border:2px solid var(--blue)}
 .timer{font-size:76px;font-weight:900;color:var(--orange);margin:16px 0 0}.qr{display:block;width:260px;max-width:90%;margin:16px auto;background:white;padding:8px;border-radius:18px;border:1px solid var(--line)}
-.hidden{display:none!important}.rolebadge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef4ff;color:var(--blue);font-size:13px;font-weight:800}.question{font-size:22px;line-height:1.35}
+.hidden{display:none!important}.rolebadge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef4ff;color:var(--blue);font-size:13px;font-weight:800}.question{font-size:22px;line-height:1.35}.choices{display:grid;gap:9px;margin:14px 0}.choice{background:#fff;color:var(--ink);border:1px solid var(--line);text-align:left;font-weight:700;padding:13px 14px}.starter{font-size:20px;line-height:1.4}.listen-list{margin:10px 0 0;padding-left:22px;font-size:17px;line-height:1.55}
 @media(max-width:390px){body{padding:0}.app{min-height:100vh;border-radius:0}}
 </style>
 </head>
@@ -57,15 +57,99 @@ async function createSession() {
   history.replaceState(null,"",`?session=${session}&role=A`);
   connect();
 }
+let reconnectTimer = null;
+
 function connect(){
+  if(!session || !role) return;
+  if(ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
   const proto = location.protocol === "https:" ? "wss" : "ws";
+  statusEl.textContent = "Connecting…";
   ws = new WebSocket(`${proto}://${location.host}/?session=${session}&role=${role}`);
-  ws.onopen=()=>statusEl.textContent="Connected";
-  ws.onclose=()=>statusEl.textContent="Disconnected";
+
+  ws.onopen=()=>{
+    if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
+    statusEl.textContent="Connected";
+  };
+
+  ws.onclose=()=>{
+    statusEl.textContent="Reconnecting…";
+    if(reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer=setTimeout(connect,1500);
+  };
+
+  ws.onerror=()=>{
+    try{ ws.close(); }catch(e){}
+  };
+
   ws.onmessage=e=>{
     const msg=JSON.parse(e.data);
-    if(msg.type==="state"){state=msg.state; statusEl.textContent=msg.connected===2?"Both phones connected":`${msg.connected}/2 connected`; render(msg.connected);}
+    if(msg.type==="state"){
+      state=msg.state;
+      statusEl.textContent=msg.connected===2?"Both phones connected":`${msg.connected}/2 connected`;
+      render(msg.connected);
+    }
   };
+}
+
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden && session && role && (!ws || ws.readyState!==WebSocket.OPEN)){
+    connect();
+  }
+});
+window.addEventListener("online",()=>{
+  if(session && role) connect();
+});
+
+
+const topicOptions = [
+  ["Something that happened to me", "Something that happened to me recently was…"],
+  ["Something I’m working on", "Something I’m working on right now is…"],
+  ["Something I’m thinking about", "Something I’ve been thinking about is…"],
+  ["Something that concerns me", "Something that concerns me right now is…"],
+  ["Something I’m happy about", "Something I’m happy about is…"]
+];
+
+function renderCoachedTurn(speaker){
+  main.innerHTML=`
+    <span class="rolebadge">Your turn</span>
+    <h1>Choose Something to Talk About</h1>
+    <p>Tap one if you want an easy place to start.</p>
+    <div class="choices" id="topics"></div>
+    <div class="callout orange hidden" id="starter"></div>
+    <div class="actions"><button class="orange-btn" id="talk">Talk</button></div>`;
+  const topics=document.getElementById("topics");
+  const starter=document.getElementById("starter");
+  topicOptions.forEach(([label,line])=>{
+    const b=btn(label,"choice",()=>{
+      starter.innerHTML=`<div class="small">You could start with:</div><div class="starter"><strong>“${line}”</strong></div><p class="small" style="margin-top:10px">You don’t need to plan the rest. Just start there and talk naturally.</p>`;
+      starter.classList.remove("hidden");
+    });
+    topics.appendChild(b);
+  });
+  const other=btn("I already know what I want to say","choice",()=>{
+    starter.innerHTML=`<div class="starter"><strong>Go with it.</strong></div><p class="small" style="margin-top:10px">You don’t need to prepare it. Just talk naturally.</p>`;
+    starter.classList.remove("hidden");
+  });
+  topics.appendChild(other);
+  document.getElementById("talk").onclick=()=>send({type:"start_timer",speaker});
+}
+
+function renderCoachedListener(){
+  main.innerHTML=`
+    <span class="rolebadge">Listen</span>
+    <h1>Your Job Is Just to Listen</h1>
+    <p>Give them your attention while they talk.</p>
+    <div class="callout">
+      <strong>While you listen, notice:</strong>
+      <ul class="listen-list">
+        <li>What are they trying to tell me?</li>
+        <li>What might they be feeling?</li>
+        <li>What do I want to understand better?</li>
+      </ul>
+    </div>
+    <p><strong>You don’t need to think about what you’re going to say yet.</strong></p>
+    <div class="small center">Their timer will appear when they begin.</div>`;
 }
 
 function render(connected=1){
@@ -94,27 +178,19 @@ function render(connected=1){
   if(phase==="ready"){
     main.innerHTML=`
       <div class="eyebrow">You’re Connected</div>
-      <h1>Let’s REACH</h1>
-      <p>${role==="A" ? "You’ll go first." : "The other person will go first."}</p>
-      <div class="callout"><strong>30-Second Rule:</strong> One person talks for about 30 seconds, then invites the other person to talk.</div>
+      <h1>Try the 30-Second Rule</h1>
+      ${role==="A" ? `<p><strong>Teach them the rule:</strong></p><div class="callout orange"><strong>“We each get about 30 seconds to talk. When one person finishes, we invite the other person to talk. Want to try it?”</strong></div>` : `<p>The other person will quickly explain the 30-Second Rule. You’ll get a turn too.</p>`}
+      <div class="callout"><strong>This may feel a little different at first.</strong><br>That’s okay. Just follow the coaching and talk naturally.</div>
       <div class="actions"></div>`;
     const a=main.querySelector(".actions");
-    if(role==="A") a.appendChild(btn("Start", "primary", ()=>send({type:"set_phase",phase:"turnA",speaker:"A"})));
-    else a.innerHTML='<div class="small center">Waiting for them to start…</div>';
+    if(role==="A") a.appendChild(btn("We’re Ready", "primary", ()=>send({type:"set_phase",phase:"turnA",speaker:"A"})));
+    else a.innerHTML='<div class="small center">Waiting for them to tap “We’re Ready”…</div>';
     return;
   }
 
   if(phase==="turnA"){
-    if(role==="A"){
-      main.innerHTML=`
-        <span class="rolebadge">Your turn</span><h1>Talk About Whatever You Want</h1>
-        <p>You might share something that happened to you, something you’re working on or thinking about, something that concerns you, or something you’re happy about.</p>
-        <p><strong>When you’re ready, tap “Talk” and start talking.</strong></p>
-        <div class="actions"><button class="orange-btn" id="talk">Talk</button></div>`;
-      document.getElementById("talk").onclick=()=>send({type:"start_timer",speaker:"A"});
-    } else {
-      main.innerHTML=`<span class="rolebadge">Listen</span><h1>Give Them Your Attention</h1><p>Listen while they share what they want to say.</p><div class="small center">Their timer will appear when they begin.</div>`;
-    }
+    if(role==="A") renderCoachedTurn("A");
+    else renderCoachedListener();
     return;
   }
 
@@ -147,15 +223,8 @@ function render(connected=1){
   }
 
   if(phase==="turnB"){
-    if(role==="B"){
-      main.innerHTML=`
-        <span class="rolebadge">Your turn</span><h1>What Would You Like To Say?</h1>
-        <p>Talk about whatever you want.</p><p><strong>When you’re ready, tap “Talk” and start talking.</strong></p>
-        <div class="actions"><button class="orange-btn" id="talk">Talk</button></div>`;
-      document.getElementById("talk").onclick=()=>send({type:"start_timer",speaker:"B"});
-    } else {
-      main.innerHTML=`<span class="rolebadge">Listen</span><h1>Give Them Your Attention</h1><p>Listen while they share what they want to say.</p>`;
-    }
+    if(role==="B") renderCoachedTurn("B");
+    else renderCoachedListener();
     return;
   }
 
